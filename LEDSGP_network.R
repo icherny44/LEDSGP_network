@@ -5,9 +5,6 @@ library(visNetwork)
 edges <- read.csv("edges.csv", stringsAsFactors = F)
 nodes <- read.csv("nodes.csv", stringsAsFactors = F)
 
-# remove nodes with no connections
-nodes <- nodes[nodes$id %in% edges$Var1 | nodes$id %in% edges$Var2, ]
-
 # set up the nodes data.frame with node attributes
 visnodes <- data.frame(id = nodes$id,
                         Name = nodes$Name,
@@ -15,9 +12,9 @@ visnodes <- data.frame(id = nodes$id,
                         font = list(size = 18,
                                     color = "black"),
                         group = nodes$Type,                                      
-                        size = c(15,45,30)[as.factor(nodes$Type)],
+                        size = c(15,30,45)[nodes$TypeID],
                         shape = "dot",
-                        color = c("green","purple","tomato")[as.factor(nodes$Type)],
+                        color = c("green","tomato","purple")[nodes$TypeID],
                         title = paste0(nodes$Description)) 
 
 # set up the edges data.frame with edge attributes
@@ -28,11 +25,14 @@ visedges <- data.frame(from = edges$from, to = edges$to,
                        width = 2,
                        smooth = TRUE)
 
+# remove nodes with no connections
+visnodes <- visnodes[nodes$id %in% edges$from | nodes$id %in% edges$to, ]
+
 # nodes for legend
 lnodes <- data.frame(id = 1:3,
                      label = c("Country", "Working Group","Regional Platform"),
                      shape = c( "dot"), color = c("green","tomato","purple"),
-                     size = 10,
+                     size = c(10,15,20),
                      stringsAsFactors = F)
 
 # plot the thing
@@ -50,7 +50,7 @@ LEDS_GP_network <- visNetwork(visnodes,visedges,width = "1200px", height = "600p
                                                    outline: none;')) %>%
                       visLegend(addNodes = lnodes, 
                                 useGroups = F,
-                                width = .2) 
+                                width = .21) 
 
 visSave(LEDS_GP_network, file = "LEDS_GP_network.html", selfcontained = FALSE)
  
