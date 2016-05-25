@@ -97,3 +97,4 @@ LEDS_GP_network <- visNetwork(visnodes,visedges,width = "100%",heigh="1000px",
             useGroups = F,
             width = .21) 
  
+# visSave(LEDS_GP_network,"LEDS_GP_network.html")
