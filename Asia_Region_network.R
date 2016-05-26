@@ -1,4 +1,6 @@
 # Asia Region LEDS GP Network Visualization
+library(data.table)
+library(RColorBrewer)
 
 # Update contents of Google sheet
 source("get.gsheet.R")
@@ -10,10 +12,11 @@ gsheet_ar <- gsheet[Region == "Asia",]
 #-------------------------------------------------------------------------------
 # Create nodes
 
-activities <- gsheet_ar[,.(Activity,Country,Begin.Date,End.Date,Status)]
+activities <- gsheet_ar[,.(Activity,`Type of activity`,Country,Status)]
 activities[,Type := "Activity"]
 activities[,id := paste0("a",1:nrow(activities))]
 setnames(activities,"Activity","Name")
+setnames(activities,"Type of activity","Group")
 
 # add leads and collaborators as nodes
 collabs <- strsplit(gsheet_ar[,Collaborators],split = ",")
@@ -71,10 +74,10 @@ visnodes <- data.frame(id = nodes$id,
                        label = nodes$Name,
                        font = list(size = 14,
                                    color = "black"),
-                       group = nodes$Type,                                      
-                       size = ifelse(nodes$Type == "Activity",20,10),
-                       shape = "dot",
-                       color = c("green","tomato","purple","blue")[nodes$typeID])
+                       `Type of Activity` = nodes$Group,                                      
+                       size = ifelse(nodes$Type == "Activity",15,10),
+                       shape = ifelse(nodes$Type == "Activity","dot","square"),
+                       color = brewer.pal(num.types, "Accent")[nodes$typeID])
 
 # set up the edges data.frame with edge attributes
 visedges <- data.frame(from = edges$id.x, to = edges$id.y,
@@ -86,17 +89,17 @@ visedges <- visedges[!is.na(visedges$to),]
 # nodes for legend
 lnodes <- data.frame(id = 1:num.types,
                      label = node.types,
-                     shape = c( "dot"), 
-                     color = c("green","tomato","purple","blue")[1:num.types],
+                     shape = c("dot","square")[1:num.types], 
+                     color = c("#7FC97F","#FDC086"),
                      size = 10,
                      stringsAsFactors = F)
 
 # plot the thing
-Asia_Region_network <- visNetwork(visnodes,visedges,width = "100%",heigh="800px",
+Asia_Region_network <- visNetwork(visnodes,visedges,width = "100%",heigh="600px",
                               main = "LEDS GP Activities - Asia Region") %>%
-  visPhysics(barnesHut = list(gravitationalConstant = "-3000")) %>%
+  visPhysics(barnesHut = list(gravitationalConstant = "-1800")) %>%
   visInteraction(tooltipDelay = 0) %>%
-  visOptions(selectedBy = list(variable = "title",
+  visOptions(selectedBy = list(variable = "Type.of.Activity",
                                #  selected = "Country",
                                style = 'width: 200px; height: 26px;
                                background: #f8f8f8;
