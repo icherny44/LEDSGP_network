@@ -5,8 +5,10 @@ library(RColorBrewer)
 # Update contents of Google sheet
 source("get.gsheet.R")
 
-# Extract Asia Region activities
+# Extract Asia Region activities and REAL
 gsheet_ar <- gsheet[Region == "Asia",]
+
+gsheet_real_ar <- gsheet_real[Region == "Asia",]
 
 #gsheet_ar <- gsheet_ar[1:10,]
 #-------------------------------------------------------------------------------
@@ -28,23 +30,52 @@ wgs.rps <- unlist(lapply(wgs.rps,
 wgs.rps <- wgs.rps[!grepl("All",wgs.rps)]
 wgs.rps <- data.table(unique(wgs.rps))
 
-Names <- fread("Names.csv")
-
 gp.nodes <- merge(Names,wgs.rps,by="V1")
 
 nodes <- rbind(activities,gp.nodes,
                fill=TRUE)
-setkey(nodes,id)
 
-nodes <- unique(nodes)
+# add REAL assistance as nodes
+real <- gsheet_real_ar[,.(Name,Country,Status)]
+real[,Group := "REAL"]
+real[,Type := "REAL"]
+real[,id := paste0("real",1:nrow(real))]
 
-nodes[,typeID := .GRP,by=Type]
+# add REAL wgs as nodes
+real.wgs <- strsplit(gsheet_real_ar[,`WG involved`],split = ",")
+real.wgs <- unlist(lapply(real.wgs,str_trim))
+real.wgs <- unlist(lapply(real.wgs, 
+                          function(x) str_replace_all(x,"[[:punct:]]","")))
+
+real.wgs <- data.table(unique(real.wgs))
+
+real.nodes <- merge(Names,real.wgs,by="V1")
+
+real.nodes <- rbind(real.nodes,real,fill = TRUE)
+
+nodes <- rbind(nodes,real.nodes,
+               fill=TRUE)
+
+# remove nodes with missing name
+nodes <- nodes[!is.na(Name),]
 
 # remove Asia LEDS Platform node
 nodes <- nodes[!(Name == "Asia LEDS Platform"),]
 
+# remove archived REAL
+nodes <- nodes[!(Status == "Archived") | is.na(Status)]
+
+# make sure nodes are unique
+setkey(nodes,Name)
+
+nodes <- unique(nodes)
+
+# identify nodes by type
+nodes[,typeID := .GRP,by=Type]
+
 node.types <- unique(nodes[,Type])
 num.types <- length(node.types)
+
 
 
 #-------------------------------------------------------------------------------
@@ -66,17 +97,40 @@ edges <- merge(edges,nodes[,.(id,Name)],by.x="Activity",by.y="Name",
 edges <- merge(edges,nodes[,.(id,V1)],by.x="value",by.y="V1",
                all.x=T,all.y=F)
 
+setnames(edges,"Activity","Name")
+
+# Create edges from REAL
+
+edges.real <- melt(gsheet_real_ar[,.(Name,`WG involved`)],id.vars=1)
+
+edges.real <- merge(edges.real,nodes[,.(id,Name)],by="Name",
+                    all.x=T,all.y=F)
+
+edges.real$value <- str_replace_all(edges.real$value,"[[:punct:]]","")
+
+edges.real <- edges.real[!is.na(value)]
+
+edges.real <- merge(edges.real,nodes[,.(id,V1)],by.x="value",by.y="V1",
+                    all.x=T,all.y=F)
+
+# combine to get all the edges
+edges <- rbind(edges,edges.real,fill=TRUE)
+
 
 #-------------------------------------------------------------------------------
+# order nodes by type
+setkey(nodes,typeID)
+
 # set up the nodes data.frame with node attributes
 visnodes <- data.frame(id = nodes$id,
-                       title = ifelse(nodes$Type == "Activity",nodes$Status,""),
+                       title = ifelse(!is.na(nodes$Status),
+                                      paste(nodes$Country,nodes$Status,sep = ", "), ""),
                        label = nodes$Name,
                        font = list(size = 14,
                                    color = "black"),
                        `Type of Activity` = nodes$Group,                                      
-                       size = ifelse(nodes$Type == "Activity",15,10),
-                       shape = ifelse(nodes$Type == "Activity","dot","square"),
+                       size = ifelse(nodes$Type == "Activity" | nodes$Type == "REAL",15,10),
+                       shape = ifelse(nodes$Type == "Activity" | nodes$Type == "REAL","dot","square"),
                        color = brewer.pal(num.types, "Accent")[nodes$typeID])
 
 # set up the edges data.frame with edge attributes
@@ -89,8 +143,9 @@ visedges <- visedges[!is.na(visedges$to),]
 # nodes for legend
 lnodes <- data.frame(id = 1:num.types,
                      label = node.types,
-                     shape = c("dot","square")[1:num.types], 
-                     color = c("#7FC97F","#FDC086"),
+                     shape = ifelse(node.types == "Activity" | node.types == "REAL"
+                                    ,"circle","square"), 
+                     color = brewer.pal(num.types,"Accent"),
                      size = 10,
                      stringsAsFactors = F)
 
