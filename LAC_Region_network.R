@@ -10,7 +10,7 @@ source("get.gsheet.R")
 # Extract LAC Region activities and REAL
 gsheet_la <- gsheet[Region == "LAC",]
 
-gsheet_real_la <- gsheet_real[Region == "LAC",]
+gsheet_real_la <- gsheet_real[Region == "LEDS LAC",]
 
 #gsheet_la <- gsheet_la[1:10,]
 #-------------------------------------------------------------------------------
@@ -18,6 +18,7 @@ gsheet_real_la <- gsheet_real[Region == "LAC",]
 
 activities <- gsheet_la[,.(Activity,`Type of activity`,Country,Status)]
 activities[,Type := "Activity"]
+activities <- activities[!Status == "Complete",]
 activities[,id := paste0("a",1:nrow(activities))]
 setnames(activities,"Activity","Name")
 setnames(activities,"Type of activity","Group")
@@ -39,8 +40,13 @@ nodes <- rbind(activities,gp.nodes,
 
 # add REAL assistance as nodes
 real <- gsheet_real_la[,.(Name,Country,Status)]
+real <- real[!is.na(Name)]
 real[,Group := "REAL"]
 real[,Type := "REAL"]
+# removed archived and provided REAL
+real <- real[!(Status == "Archived" | Status == "Provided")]
+
+# add real ID
 real[,id := paste0("real",1:nrow(real))]
 
 # add REAL wgs as nodes
@@ -51,9 +57,13 @@ real.wgs <- unlist(lapply(real.wgs,
 
 real.wgs <- data.table(unique(real.wgs))
 
-real.nodes <- merge(Names,real.wgs,by="V1")
+real.wgs <- merge(Names,real.wgs,by="V1",all.y = T)
+real.wgs[is.na(Name),Name := V1]
 
-real.nodes <- rbind(real.nodes,real,fill = TRUE)
+real.nodes <- rbind(real.wgs,real,fill = TRUE)
+
+# create ids for nodes not defined in Names.csv
+real.nodes[is.na(id),id := paste0("o",.I)]
 
 nodes <- rbind(nodes,real.nodes,
                fill=TRUE)
@@ -64,8 +74,8 @@ nodes <- nodes[!is.na(Name),]
 # remove LAC LEDS Platform node
 nodes <- nodes[!(Name == "LEDS LAC Partnership"),]
 
-# remove archived REAL
-nodes <- nodes[!(Status == "Archived") | is.na(Status)]
+# add "other" type to other nodes
+nodes[is.na(Type),Type := "Other"]
 
 # make sure nodes are unique
 setkey(nodes,Name)
@@ -94,8 +104,10 @@ edges <- rbind(edges,collabs[,-2],fill=TRUE)
 
 edges <- merge(edges,nodes[,.(id,Name)],by.x="Activity",by.y="Name",
                all.x=T,all.y=F)
-edges <- merge(edges,nodes[,.(id,V1)],by.x="value",by.y="V1",
+edges <- merge(edges,nodes[!is.na(V1),.(id,V1)],by.x="value",by.y="V1",
                all.x=T,all.y=F)
+
+edges <- edges[!(is.na(id.x) | is.na(id.y))]
 
 setnames(edges,"Activity","Name")
 
@@ -108,13 +120,18 @@ edges.real <- merge(edges.real,nodes[,.(id,Name)],by="Name",
 
 edges.real$value <- str_replace_all(edges.real$value,"[[:punct:]]","")
 
-edges.real <- edges.real[!is.na(value)]
+edges.real <- edges.real[!(is.na(Name) | is.na(id))]
 
 edges.real <- merge(edges.real,nodes[,.(id,V1)],by.x="value",by.y="V1",
                     all.x=T,all.y=F)
 
+# switch order so that edges are always from WGs to REAL
+edges.real <- data.table(Name = edges.real$Name,
+                         id.x = edges.real$id.y, id.y = edges.real$id.x)
+
 # combine to get all the edges
 edges <- rbind(edges,edges.real,fill=TRUE)
+edges <- edges[!is.na(Name)]
 
 #-------------------------------------------------------------------------------
 # order nodes by type
@@ -123,47 +140,61 @@ setkey(nodes,typeID)
 # set up the nodes data.frame with node attributes
 visnodes <- data.frame(id = nodes$id,
                        title = ifelse(!is.na(nodes$Status),
-                                      paste(nodes$Country,nodes$Status,sep = ", "), ""),
+                                      paste0("Country: ",nodes$Country,
+                                            "<br>",
+                                            "Status: ",nodes$Status), ""),
                        label = nodes$Name,
                        font = list(size = 14,
                                    color = "black"),
                        `Type of Activity` = nodes$Group,                                      
                        size = ifelse(nodes$Type == "Activity" | nodes$Type == "REAL",15,10),
                        shape = ifelse(nodes$Type == "Activity" | nodes$Type == "REAL","dot","square"),
-                       color = brewer.pal(num.types, "Accent")[nodes$typeID])
+                       color = brewer.pal(num.types, "Accent")[nodes$typeID],
+                       hidden = ifelse(nodes$Name == "TBD",TRUE,FALSE))
+
+# order by type of node to get correct hierarchy
+visnodes$idType <- strtrim(visnodes$id,1)
+visnodes$idType <- factor(visnodes$idType, levels = c("o","w","s","a","r"))
+visnodes <- visnodes[order(visnodes$idType),]
+
+# create hidden nodes 
+hidden <- list(id = "h", hidden = TRUE)
+visnodes <- rbind(as.data.table(visnodes),hidden,fill= TRUE)
 
 # set up the edges data.frame with edge attributes
+TBD <- unique(nodes[Name == "TBD",id])
 visedges <- data.frame(from = edges$id.x, to = edges$id.y,
                        width = 2,
-                       smooth = TRUE)
+                       smooth = FALSE,
+                       color = ifelse(edges$id.x == TBD,"white",NA))
 
-visedges <- visedges[!is.na(visedges$to),]
+visedges$fromID <- strtrim(visedges$from,1)
+visedges$fromID <- factor(visedges$fromID, levels = c("o","w","s","a","r"))
+visedges <- visedges[order(visedges$fromID),]
+
+# add hidden edges
+mid.nodes <- nodes[!is.na(V1),id]
+hidden.edge <- list(from = rep("h",length(mid.nodes)), to = mid.nodes,
+                    color = rep("white",length(mid.nodes)))
+visedges <- rbind(as.data.table(visedges),hidden.edge,fill= TRUE)
 
 # nodes for legend
 lnodes <- data.frame(id = 1:num.types,
                      label = node.types,
                      shape = ifelse(node.types == "Activity" | node.types == "REAL"
-                                    ,"circle","square"), 
+                                    ,"dot","square"), 
                      color = brewer.pal(num.types,"Accent"),
                      size = 10,
                      stringsAsFactors = F)
 
 # plot the thing
 LAC_Region_network <- visNetwork(visnodes,visedges,width = "100%",heigh="600px",
-                                  main = "LEDS GP Activities - LAC Region") %>%
-  visPhysics(barnesHut = list(gravitationalConstant = "-1800")) %>%
+                                 main = "LEDS GP Activities - LAC Region") %>%
   visInteraction(tooltipDelay = 0) %>%
-  visOptions(selectedBy = list(variable = "Type.of.Activity",
-                               #  selected = "Country",
-                               style = 'width: 200px; height: 26px;
-                               background: #f8f8f8;
-                               color: black;
-                               border: none;
-                               outline: none;'),
-             highlightNearest = TRUE) %>%
   visLegend(addNodes = lnodes, 
             useGroups = F,
-            width = .1) 
+            width = .1) %>%
+  visHierarchicalLayout(direction = "LR", treeSpacing = 100,
+                        levelSeparation = 400, sortMethod = 'directed')
 
 visSave(LAC_Region_network,"LAC_Region_network.html")
-
